@@ -80,6 +80,7 @@ export interface Env {
   VECTORIZE: VectorizeIndex;
   AI: Ai;
   MCP_AUTH_TOKEN: string;
+  VOYAGE_API_KEY: string;
   MCP_AGENT: DurableObjectNamespace;
 }
 

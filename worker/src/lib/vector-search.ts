@@ -1,10 +1,11 @@
 import type { Env, VectorMatch } from "./types";
 
-const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
+const VOYAGE_MODEL = "voyage-3";
+const VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings";
 
 /**
- * Perform a semantic search: embed the text query via Workers AI,
- * then query the Vectorize index with the resulting vector.
+ * Perform a semantic search: embed the query text via Voyage AI
+ * (matching the indexer's model), then query the Vectorize index.
  */
 export async function vectorQuery(
   env: Env,
@@ -13,17 +14,30 @@ export async function vectorQuery(
 ): Promise<VectorMatch[]> {
   const topK = options.topK ?? 10;
 
-  // Generate embedding for the query text
-  const embeddingResponse = await env.AI.run(EMBEDDING_MODEL, {
-    text: [text],
+  // Generate query embedding via Voyage AI REST API
+  const response = await fetch(VOYAGE_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.VOYAGE_API_KEY}`,
+    },
+    body: JSON.stringify({
+      input: [text],
+      model: VOYAGE_MODEL,
+      input_type: "query",
+    }),
   });
 
-  // The response is a union; narrow to the data-bearing variant
-  if (!("data" in embeddingResponse) || !embeddingResponse.data) {
-    return [];
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Voyage AI API error ${response.status}: ${body}`);
   }
 
-  const embedding = embeddingResponse.data[0];
+  const json = (await response.json()) as {
+    data: { embedding: number[] }[];
+  };
+
+  const embedding = json.data?.[0]?.embedding;
   if (!embedding) {
     return [];
   }

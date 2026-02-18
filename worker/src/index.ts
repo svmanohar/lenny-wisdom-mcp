@@ -14,6 +14,8 @@ import {
   handleSharpenLanguage,
 } from "./tools";
 
+// McpAgent Durable Object — each session gets its own instance with
+// its own McpServer and transport. Uses streamable-http (default in v0.5.0).
 export class LennyWisdomMCP extends McpAgent<Env> {
   server = new McpServer({ name: "lenny-wisdom", version: "0.1.0" });
 
@@ -313,32 +315,39 @@ export class LennyWisdomMCP extends McpAgent<Env> {
   }
 }
 
-// Mount the MCP agent on /mcp path, using the MCP_AGENT durable object binding
-const mcpHandler = LennyWisdomMCP.mount("/mcp", { binding: "MCP_AGENT" });
+// McpAgent.serve() defaults to streamable-http in v0.5.0.
+// Each session gets its own DO instance → no shared-server issues.
+const mcpHandler = LennyWisdomMCP.serve("/mcp", { binding: "MCP_AGENT" });
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
-    // Health check - no auth required
+    // Health check — no auth required
     if (url.pathname === "/health") {
       return new Response(JSON.stringify({ status: "ok" }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    // Bearer token auth for all other endpoints
+    // Bearer token auth for /mcp endpoint.
+    // Uses 403 (not 401) to avoid triggering the MCP SDK's OAuth negotiation flow.
     const authHeader = request.headers.get("Authorization");
     if (!authHeader || authHeader !== `Bearer ${env.MCP_AUTH_TOKEN}`) {
-      return new Response("Unauthorized", { status: 401 });
+      return new Response(JSON.stringify({ error: "forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // Route MCP requests through the Durable Object agent
-    if (url.pathname.startsWith("/mcp")) {
-      const response = await mcpHandler.fetch(request, env as unknown as Record<string, DurableObjectNamespace<McpAgent>>, ctx);
-      if (response) return response;
+    // Only /mcp is a valid endpoint — reject everything else with JSON 404.
+    if (url.pathname !== "/mcp") {
+      return new Response(JSON.stringify({ error: "not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    return new Response("Lenny Wisdom MCP Server", { status: 200 });
+    return mcpHandler.fetch(request, env, ctx);
   },
 };

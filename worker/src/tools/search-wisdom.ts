@@ -12,7 +12,7 @@ export interface SearchWisdomArgs {
 
 /**
  * Semantic search across all Lenny's Podcast wisdom.
- * Embeds the query via Workers AI, searches VECTORIZE, optionally
+ * Embeds the query via Voyage AI, searches VECTORIZE, optionally
  * filters by tag, enriches from D1, and returns formatted markdown.
  */
 export async function handleSearchWisdom(
