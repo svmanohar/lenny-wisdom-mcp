@@ -1,5 +1,6 @@
 """Framework and heuristic extraction using Claude Sonnet."""
 
+import asyncio
 import json
 import anthropic
 from indexer.models import ExtractionResult
@@ -66,12 +67,59 @@ def parse_extraction_response(response: str) -> ExtractionResult:
     return ExtractionResult(**data)
 
 
-async def extract_from_segment(segment_content: str) -> ExtractionResult:
-    client = anthropic.AsyncAnthropic()
+# Module-level shared client — created once, reused across all coroutines.
+# anthropic.AsyncAnthropic is thread-safe and asyncio-safe for concurrent use.
+_anthropic_client: anthropic.AsyncAnthropic | None = None
+
+
+def get_anthropic_client() -> anthropic.AsyncAnthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.AsyncAnthropic()
+    return _anthropic_client
+
+
+async def extract_from_segment(
+    segment_content: str,
+    semaphore: asyncio.Semaphore | None = None,
+) -> ExtractionResult:
+    """Extract structured knowledge from a single segment.
+
+    Args:
+        segment_content: The transcript segment text.
+        semaphore: Optional semaphore to cap concurrent Sonnet calls across
+                   all episodes. Pass the same semaphore instance to every
+                   call so the limit is global, not per-episode.
+    """
+    client = get_anthropic_client()
     prompt = build_extraction_prompt(segment_content)
-    message = await client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return parse_extraction_response(message.content[0].text)
+
+    async def _call() -> ExtractionResult:
+        message = await client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return parse_extraction_response(message.content[0].text)
+
+    if semaphore is not None:
+        async with semaphore:
+            return await _call()
+    return await _call()
+
+
+async def extract_all_segments(
+    segment_contents: list[str],
+    semaphore: asyncio.Semaphore | None = None,
+) -> list[ExtractionResult]:
+    """Extract from all segments in an episode concurrently.
+
+    All segment calls for this episode run in parallel (subject to the shared
+    semaphore). With 5 segments per episode this cuts per-episode Sonnet time
+    from ~5 × 4s = 20s down to ~4s (one Sonnet RTT).
+    """
+    tasks = [
+        extract_from_segment(content, semaphore)
+        for content in segment_contents
+    ]
+    return list(await asyncio.gather(*tasks))

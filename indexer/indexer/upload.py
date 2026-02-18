@@ -127,19 +127,24 @@ async def upload_to_d1(
     database_id: str,
     api_token: str,
 ) -> None:
-    """Upload structured data to Cloudflare D1 via REST API."""
-    url = f"{CF_API_BASE}/accounts/{account_id}/d1/database/{database_id}/query"
+    """Upload structured data to Cloudflare D1 via REST API.
 
-    async with httpx.AsyncClient() as client:
-        batch_size = 100
-        for i in range(0, len(stmts), batch_size):
-            batch = stmts[i : i + batch_size]
-            resp = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {api_token}"},
-                json=batch,
-            )
-            resp.raise_for_status()
+    The D1 REST API /query endpoint accepts a single {sql, params} object
+    per request (not an array). Statements are sent sequentially to
+    respect ordering (episode INSERT before dependent segment INSERTs).
+    """
+    url = f"{CF_API_BASE}/accounts/{account_id}/d1/database/{database_id}/query"
+    headers = {"Authorization": f"Bearer {api_token}"}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for i, stmt in enumerate(stmts):
+            resp = await client.post(url, headers=headers, json=stmt)
+            if not resp.is_success:
+                body = resp.text
+                raise RuntimeError(
+                    f"D1 API error {resp.status_code} on statement {i + 1}/{len(stmts)}: "
+                    f"{stmt['sql'][:80]}... — {body}"
+                )
 
 
 async def upload_to_vectorize(
