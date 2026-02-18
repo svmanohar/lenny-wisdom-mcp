@@ -1,8 +1,8 @@
 # Lenny Wisdom MCP
 
-An MCP (Model Context Protocol) server that gives Claude access to 303 episodes of [Lenny's Podcast](https://www.lennyspodcast.com/) — the leading podcast for product managers. Ask it for frameworks, real company examples, coaching on decisions, and vocabulary guidance, all grounded in what guests actually said.
+An MCP (Model Context Protocol) server that gives Claude access to 300+ episodes of [Lenny's Podcast](https://www.lennyspodcast.com/) — the leading podcast for product managers. Ask it for frameworks, real company examples, coaching on decisions, and vocabulary guidance, all grounded in what guests actually said.
 
-Built on Cloudflare Workers with D1 and Vectorize. Transport: streamable HTTP.
+Built on Cloudflare Workers with D1 and Vectorize. Transport: streamable HTTP. New episodes sync automatically from Dropbox.
 
 ---
 
@@ -48,12 +48,12 @@ sharpen_language("we need to move fast" audience="executive")
           │  structured data│  │  segment vectors  │  │  query embeds   │
           └────────────────┘  └──────────────────┘  └─────────────────┘
 
-Indexing pipeline (runs once, offline):
+Indexing pipeline (runs once per episode, cached to disk):
 
-  Transcript .md files
+  Transcript .md or .txt files
        │
        ▼
-  Parse metadata (YAML frontmatter: guest, title, date, topics)
+  Parse metadata (YAML frontmatter or guest name from filename)
        │
        ▼
   Haiku — segment into topic-coherent blocks (300–2000 tokens, 75-token overlap)
@@ -67,6 +67,9 @@ Indexing pipeline (runs once, offline):
        │
        ▼
   Voyage AI — 1024-dim embedding per segment
+       │
+       ▼
+  Save .extraction.json cache to disk (crash-safe — survives upload failures)
        │
        ▼
   Upload → D1 (structured rows) + Vectorize (vectors)
@@ -265,15 +268,32 @@ export CF_API_TOKEN="<your-cf-api-token>"
 #### Run the pipeline
 
 ```bash
-# Dry run (no upload)
+# Dry run (no upload, saves cache files)
 uv run python -m indexer.run --transcripts /path/to/episodes --limit 5 --dry-run
 
 # Live run on 5 episodes
 uv run python -m indexer.run --transcripts /path/to/episodes --limit 5
 
-# Full corpus (303 episodes, ~10-15 min with default concurrency)
+# Full corpus (~10-15 min with default concurrency)
 uv run python -m indexer.run --transcripts /path/to/episodes
+
+# Upload from cache only — zero API cost (reuses saved extractions + embeddings)
+uv run python -m indexer.run --transcripts /path/to/episodes --upload-only
+
+# Force re-process even if cache exists
+uv run python -m indexer.run --transcripts /path/to/episodes --force
 ```
+
+#### Caching
+
+Every successfully processed episode is saved to a `.extraction.json` file next to its transcript. On subsequent runs, episodes with a valid cache file are loaded from disk — skipping all AI API calls. This means:
+
+- **Crash recovery** — if upload fails mid-run, re-run and only the upload repeats
+- **Incremental runs** — new episodes process while cached ones are skipped
+- **`--upload-only`** — re-upload everything from cache for $0 in API costs
+- **Migration-portable** — the JSON files contain all structured data + embeddings, independent of D1/Vectorize
+
+The pipeline accepts both `.md` files (with YAML frontmatter) and `.txt` files (raw transcript text, guest name inferred from filename).
 
 #### Concurrency tuning
 
@@ -305,6 +325,49 @@ Add to `~/.claude/mcp_servers.json` (global) or `.mcp.json` (project-scoped):
 
 Restart Claude Code after editing the config.
 
+### 5. Auto-sync new episodes (optional)
+
+New episodes are published to a shared Dropbox folder. The sync script polls for new `.txt` files, downloads them, and runs the indexing pipeline — all cached episodes are skipped automatically.
+
+#### One-time Dropbox auth
+
+```bash
+cd indexer
+uv run python dropbox_auth.py
+```
+
+This opens your browser to authorize a Dropbox app. Paste the code back in the terminal. A refresh token is saved to `~/.lenny-wisdom/dropbox_token.json` — access tokens auto-refresh from here (the refresh token never expires).
+
+#### Manual sync
+
+```bash
+# Check what's new (no downloads, no cost)
+uv run python sync_dropbox.py --dry-run
+
+# Sync and index new episodes (~$0.25 per new episode)
+ANTHROPIC_API_KEY=xxx VOYAGE_API_KEY=xxx CF_ACCOUNT_ID=xxx CF_DB_ID=xxx CF_API_TOKEN=xxx \
+  uv run python sync_dropbox.py
+```
+
+#### Automated sync via cron
+
+Copy `sync-cron.sh.example` and fill in your API keys:
+
+```bash
+cp sync-cron.sh.example sync-cron.sh
+# Edit sync-cron.sh with your keys — this file is gitignored
+```
+
+Then add to crontab:
+
+```bash
+crontab -e
+# Runs every Monday at 8am. Logs to ~/.lenny-wisdom/sync.log
+0 8 * * 1  /path/to/lenny-wisdom-mcp/indexer/sync-cron.sh
+```
+
+The cron script handles PATH setup, log rotation, and auto-refreshes the Dropbox token. It only costs money when there's actually a new episode to process.
+
 ---
 
 ## Local development
@@ -329,6 +392,7 @@ uv run pytest  # 49 pytest tests (all API clients mocked)
 - **Auth returns 403, not 401** — 401 triggers MCP SDK OAuth flow; bearer token auth uses 403
 - **`nodejs_compat` required** — the `agents` package needs this compatibility flag in `wrangler.toml`
 - **`ExtractedExample.company` is nullable** — Sonnet occasionally returns null for the company field
+- **Dropbox access token expires in 4 hours** — the sync script auto-refreshes via the stored refresh token; re-run `dropbox_auth.py` only if the app is revoked
 
 ---
 
@@ -338,7 +402,7 @@ uv run pytest  # 49 pytest tests (all API clients mocked)
 lenny-wisdom-mcp/
 ├── worker/                         # Cloudflare Worker
 │   ├── src/
-│   │   ├── index.ts                # McpAgent DO + fetch handler
+│   │   ├── index.ts                # MCP handler + fetch handler
 │   │   ├── db/
 │   │   │   ├── queries.ts          # D1 queries
 │   │   │   └── schema.sql          # 9-table schema
@@ -351,15 +415,18 @@ lenny-wisdom-mcp/
 │   └── package.json
 ├── indexer/                        # Python indexing pipeline
 │   ├── indexer/
-│   │   ├── run.py                  # CLI entrypoint (click)
-│   │   ├── parse.py                # Transcript parser
+│   │   ├── run.py                  # CLI entrypoint (click) with caching
+│   │   ├── parse.py                # Transcript parser (.md + .txt)
 │   │   ├── segment.py              # Haiku segmentation
 │   │   ├── extract.py              # Sonnet extraction
 │   │   ├── embed.py                # Voyage AI embeddings
-│   │   ├── upload.py               # D1 + Vectorize upload
+│   │   ├── upload.py               # D1 + Vectorize upload (retry + concurrency)
 │   │   ├── guest.py                # Guest profile extraction
 │   │   ├── models.py               # Pydantic models
 │   │   └── taxonomy.py             # 55 PM taxonomy tags
+│   ├── sync_dropbox.py             # Dropbox sync + pipeline trigger
+│   ├── dropbox_auth.py             # One-time OAuth setup
+│   ├── sync-cron.sh.example        # Cron wrapper template (copy + add keys)
 │   └── pyproject.toml
 └── HANDOVER.md
 ```

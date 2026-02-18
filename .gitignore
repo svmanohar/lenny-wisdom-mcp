@@ -7,3 +7,5 @@ __pycache__/
 .venv/
 *.extraction.json
 .env
+sync-cron.sh
+.mcp.json

@@ -1,0 +1,46 @@
+#!/bin/bash
+# Cron job for syncing new Lenny's Podcast transcripts.
+# Runs the Dropbox sync + indexing pipeline.
+#
+# Setup:
+#   1. Copy this file: cp sync-cron.sh.example sync-cron.sh
+#   2. Fill in API keys below
+#   3. crontab -e → add:
+#      0 8 * * 1  /path/to/lenny-wisdom-mcp/indexer/sync-cron.sh
+#
+# Logs to ~/.lenny-wisdom/sync.log
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG_DIR="$HOME/.lenny-wisdom"
+LOG_FILE="$LOG_DIR/sync.log"
+MAX_LOG_LINES=5000
+
+mkdir -p "$LOG_DIR"
+
+# Rotate log if it gets too long
+if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE")" -gt "$MAX_LOG_LINES" ]; then
+    tail -n 2000 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+fi
+
+{
+    echo ""
+    echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
+
+    # Fill in your API keys here
+    export ANTHROPIC_API_KEY="your-anthropic-key"
+    export VOYAGE_API_KEY="your-voyage-key"
+    export CF_ACCOUNT_ID="your-cf-account-id"
+    export CF_DB_ID="your-d1-database-id"
+    export CF_API_TOKEN="your-cf-api-token"
+
+    cd "$SCRIPT_DIR"
+
+    # uv needs to be on PATH — add common install locations
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+    uv run python sync_dropbox.py 2>&1
+
+    echo "=== Done ==="
+} >> "$LOG_FILE" 2>&1

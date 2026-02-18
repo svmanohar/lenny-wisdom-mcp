@@ -386,7 +386,11 @@ def main(
         )
 
     transcript_dir = Path(transcripts)
-    files = sorted(transcript_dir.glob("**/transcript.md"))
+    # Support both .md (original repo) and .txt (Dropbox) formats
+    files = sorted(
+        list(transcript_dir.glob("**/transcript.md"))
+        + list(transcript_dir.glob("**/*.txt"))
+    )
     if not files:
         files = sorted(transcript_dir.glob("*.md"))
     if limit > 0:
