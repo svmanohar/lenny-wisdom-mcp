@@ -1,5 +1,6 @@
 """Upload indexed data to Cloudflare D1 and Vectorize."""
 
+import asyncio
 import json
 
 import httpx
@@ -12,6 +13,10 @@ from indexer.models import (
 )
 
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
+
+MAX_RETRIES = 3
+RETRY_BACKOFF = [1, 3, 10]  # seconds between retries
+D1_UPLOAD_CONCURRENCY = 10  # concurrent episode uploads to D1
 
 
 def build_d1_insert_statements(
@@ -121,30 +126,72 @@ def build_guest_insert_statement(guest: GuestProfile) -> dict:
     }
 
 
-async def upload_to_d1(
+async def _send_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    stmt: dict,
+    label: str,
+) -> None:
+    """Send a single D1 statement with retry on transient errors."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = await client.post(url, headers=headers, json=stmt)
+            if resp.is_success:
+                return
+            if resp.status_code >= 500 and attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(RETRY_BACKOFF[attempt])
+                continue
+            raise RuntimeError(
+                f"D1 API error {resp.status_code} on {label}: "
+                f"{stmt['sql'][:80]}... — {resp.text[:200]}"
+            )
+        except httpx.TransportError as exc:
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(RETRY_BACKOFF[attempt])
+                continue
+            raise RuntimeError(f"D1 transport error on {label}: {exc}") from exc
+
+
+async def upload_episode_stmts(
     stmts: list[dict],
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    episode_label: str,
+) -> None:
+    """Upload one episode's statements sequentially (ordering matters)."""
+    for i, stmt in enumerate(stmts):
+        await _send_with_retry(
+            client, url, headers, stmt,
+            label=f"{episode_label} stmt {i + 1}/{len(stmts)}",
+        )
+
+
+async def upload_to_d1(
+    episode_stmt_groups: list[list[dict]],
     account_id: str,
     database_id: str,
     api_token: str,
 ) -> None:
     """Upload structured data to Cloudflare D1 via REST API.
 
-    The D1 REST API /query endpoint accepts a single {sql, params} object
-    per request (not an array). Statements are sent sequentially to
-    respect ordering (episode INSERT before dependent segment INSERTs).
+    Takes a list of statement groups (one group per episode). Within each
+    group, statements run sequentially (episode INSERT before segments).
+    Different episodes upload concurrently with a semaphore.
     """
     url = f"{CF_API_BASE}/accounts/{account_id}/d1/database/{database_id}/query"
     headers = {"Authorization": f"Bearer {api_token}"}
+    sem = asyncio.Semaphore(D1_UPLOAD_CONCURRENCY)
+
+    async def _upload_group(idx: int, stmts: list[dict]) -> None:
+        async with sem:
+            await upload_episode_stmts(stmts, client, url, headers, f"episode-{idx}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        for i, stmt in enumerate(stmts):
-            resp = await client.post(url, headers=headers, json=stmt)
-            if not resp.is_success:
-                body = resp.text
-                raise RuntimeError(
-                    f"D1 API error {resp.status_code} on statement {i + 1}/{len(stmts)}: "
-                    f"{stmt['sql'][:80]}... — {body}"
-                )
+        await asyncio.gather(
+            *[_upload_group(i, group) for i, group in enumerate(episode_stmt_groups)]
+        )
 
 
 async def upload_to_vectorize(
@@ -156,17 +203,29 @@ async def upload_to_vectorize(
     """Upload vectors to Cloudflare Vectorize via NDJSON."""
     url = f"{CF_API_BASE}/accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         batch_size = 100
         for i in range(0, len(vectors), batch_size):
             batch = vectors[i : i + batch_size]
             ndjson = "\n".join(json.dumps(v) for v in batch)
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_token}",
-                    "Content-Type": "application/x-ndjson",
-                },
-                content=ndjson,
-            )
-            resp.raise_for_status()
+            for attempt in range(MAX_RETRIES):
+                try:
+                    resp = await client.post(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {api_token}",
+                            "Content-Type": "application/x-ndjson",
+                        },
+                        content=ndjson,
+                    )
+                    if resp.is_success:
+                        break
+                    if resp.status_code >= 500 and attempt < MAX_RETRIES - 1:
+                        await asyncio.sleep(RETRY_BACKOFF[attempt])
+                        continue
+                    resp.raise_for_status()
+                except httpx.TransportError:
+                    if attempt < MAX_RETRIES - 1:
+                        await asyncio.sleep(RETRY_BACKOFF[attempt])
+                        continue
+                    raise
