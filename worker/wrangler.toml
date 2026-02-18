@@ -17,3 +17,6 @@ database_id = ""  # filled after `wrangler d1 create`
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "lenny-wisdom-vectors"
+
+[ai]
+binding = "AI"

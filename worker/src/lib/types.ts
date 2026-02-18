@@ -66,6 +66,15 @@ export interface SearchResult {
 export interface Env {
   DB: D1Database;
   VECTORIZE: VectorizeIndex;
+  AI: Ai;
   MCP_AUTH_TOKEN: string;
   MCP_AGENT: DurableObjectNamespace;
+}
+
+/**
+ * Result from our vector search helper.
+ */
+export interface VectorMatch {
+  id: string;
+  score: number;
 }
