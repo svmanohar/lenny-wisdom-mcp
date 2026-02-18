@@ -1,0 +1,19 @@
+name = "lenny-wisdom-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[durable_objects]
+bindings = [{ name = "MCP_AGENT", class_name = "LennyWisdomMCP" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["LennyWisdomMCP"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lenny-wisdom-db"
+database_id = ""  # filled after `wrangler d1 create`
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "lenny-wisdom-vectors"
