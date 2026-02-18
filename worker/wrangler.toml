@@ -1,18 +1,19 @@
 name = "lenny-wisdom-mcp"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 [durable_objects]
 bindings = [{ name = "MCP_AGENT", class_name = "LennyWisdomMCP" }]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["LennyWisdomMCP"]
+new_sqlite_classes = ["LennyWisdomMCP"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "lenny-wisdom-db"
-database_id = ""  # filled after `wrangler d1 create`
+database_id = "532c0885-114f-419a-b06c-c3cf4b178c71"
 
 [[vectorize]]
 binding = "VECTORIZE"
