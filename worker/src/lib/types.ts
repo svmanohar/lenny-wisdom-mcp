@@ -51,6 +51,18 @@ export interface CommunicationPattern {
   source_attribution: string | null;
 }
 
+export interface Guest {
+  id: number;
+  name: string;
+  current_role: string | null;
+  current_company: string | null;
+  notable_companies: string[];
+  domain_expertise: string[];
+  company_stages: string[];
+  industry_verticals: string[];
+  bio_summary: string | null;
+}
+
 export interface SearchResult {
   segment: Segment;
   episode: Episode | null;

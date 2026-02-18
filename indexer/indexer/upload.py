@@ -7,6 +7,7 @@ import httpx
 from indexer.models import (
     EpisodeMetadata,
     ExtractionResult,
+    GuestProfile,
     SegmentMetadata,
 )
 
@@ -96,6 +97,28 @@ def build_d1_insert_statements(
             })
 
     return stmts
+
+
+def build_guest_insert_statement(guest: GuestProfile) -> dict:
+    """Build a D1 INSERT OR IGNORE statement for a guest profile."""
+    return {
+        "sql": (
+            "INSERT OR IGNORE INTO guests "
+            "(name, current_role, current_company, notable_companies, "
+            "domain_expertise, company_stages, industry_verticals, bio_summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ),
+        "params": [
+            guest.name,
+            guest.current_role,
+            guest.current_company,
+            json.dumps(guest.notable_companies),
+            json.dumps(guest.domain_expertise),
+            json.dumps(guest.company_stages),
+            json.dumps(guest.industry_verticals),
+            guest.bio_summary,
+        ],
+    }
 
 
 async def upload_to_d1(

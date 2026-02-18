@@ -63,6 +63,22 @@ def parse_segmentation_response(response: str, episode_id: str) -> list[SegmentM
             token_count=_estimate_tokens(content),
         ))
 
+    return _add_segment_overlap(segments)
+
+
+def _add_segment_overlap(segments: list[SegmentMetadata], overlap_tokens: int = 75) -> list[SegmentMetadata]:
+    """Add overlap from previous segment's tail to each segment's start."""
+    overlap_chars = overlap_tokens * 4  # rough token-to-char conversion
+    for i in range(1, len(segments)):
+        prev_content = segments[i - 1].content
+        if len(prev_content) > overlap_chars:
+            overlap_text = prev_content[-overlap_chars:]
+            # Break at a word boundary to avoid splitting mid-word
+            space_idx = overlap_text.find(' ')
+            if space_idx > 0:
+                overlap_text = overlap_text[space_idx + 1:]
+            segments[i].content = overlap_text + "\n" + segments[i].content
+            segments[i].token_count = _estimate_tokens(segments[i].content)
     return segments
 
 

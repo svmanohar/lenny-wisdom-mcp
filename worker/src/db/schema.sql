@@ -73,7 +73,21 @@ CREATE TABLE IF NOT EXISTS quotes (
     speaker TEXT
 );
 
+-- Guests: structured profile per podcast guest
+CREATE TABLE IF NOT EXISTS guests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    current_role TEXT,
+    current_company TEXT,
+    notable_companies TEXT,   -- JSON array
+    domain_expertise TEXT,    -- JSON array
+    company_stages TEXT,      -- JSON array e.g. ["seed","growth","public"]
+    industry_verticals TEXT,  -- JSON array e.g. ["B2B","marketplace","SaaS"]
+    bio_summary TEXT
+);
+
 -- Indexes
+CREATE INDEX IF NOT EXISTS idx_guests_name ON guests(name);
 CREATE INDEX IF NOT EXISTS idx_segments_episode ON segments(episode_id);
 CREATE INDEX IF NOT EXISTS idx_frameworks_name ON frameworks(name);
 CREATE INDEX IF NOT EXISTS idx_examples_company ON examples(company);

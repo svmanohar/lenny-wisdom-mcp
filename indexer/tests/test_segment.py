@@ -1,4 +1,5 @@
-from indexer.segment import build_segmentation_prompt, parse_segmentation_response
+from indexer.segment import build_segmentation_prompt, parse_segmentation_response, _add_segment_overlap, _estimate_tokens
+from indexer.models import SegmentMetadata
 
 SAMPLE_TRANSCRIPT = """
 Lenny (00:00:00):
@@ -140,3 +141,105 @@ def test_parse_token_count_estimated():
     assert len(segments) == 1
     content_len = len(segments[0].content)
     assert segments[0].token_count == content_len // 4
+
+
+# ── tests for segment overlap ──
+
+
+def _make_segment(content: str, idx: int = 0) -> SegmentMetadata:
+    return SegmentMetadata(
+        segment_id=f"ep-test-seg-{idx}",
+        topic=f"topic {idx}",
+        speakers=["A"],
+        content=content,
+        token_count=_estimate_tokens(content),
+    )
+
+
+def test_overlap_prepends_tail_of_previous_segment():
+    """Second segment should start with text from end of first segment."""
+    long_content = "word " * 200  # ~1000 chars, well above 300 threshold
+    seg0 = _make_segment(long_content.strip(), idx=0)
+    seg1 = _make_segment("Next topic content here.", idx=1)
+    original_seg1_content = seg1.content
+
+    result = _add_segment_overlap([seg0, seg1])
+    assert result[1].content.endswith(original_seg1_content)
+    assert len(result[1].content) > len(original_seg1_content)
+    # Overlap text should come from the tail of seg0
+    assert "word" in result[1].content.split("\n")[0]
+
+
+def test_overlap_skips_first_segment():
+    """First segment should never be modified."""
+    long_content = "word " * 200
+    seg0 = _make_segment(long_content.strip(), idx=0)
+    seg1 = _make_segment("Second segment.", idx=1)
+    original_seg0_content = seg0.content
+
+    _add_segment_overlap([seg0, seg1])
+    assert seg0.content == original_seg0_content
+
+
+def test_overlap_skips_when_previous_too_short():
+    """No overlap if previous segment content is shorter than overlap_chars."""
+    short_content = "Short."  # ~6 chars, well below 300
+    seg0 = _make_segment(short_content, idx=0)
+    seg1 = _make_segment("Second segment.", idx=1)
+    original_seg1_content = seg1.content
+
+    _add_segment_overlap([seg0, seg1])
+    assert seg1.content == original_seg1_content
+
+
+def test_overlap_updates_token_count():
+    """Token count should be recalculated after overlap is added."""
+    long_content = "word " * 200
+    seg0 = _make_segment(long_content.strip(), idx=0)
+    seg1 = _make_segment("Next topic.", idx=1)
+
+    _add_segment_overlap([seg0, seg1])
+    assert seg1.token_count == _estimate_tokens(seg1.content)
+
+
+def test_overlap_single_segment_unchanged():
+    """A single segment should be returned unchanged."""
+    seg0 = _make_segment("Only segment content.", idx=0)
+    original = seg0.content
+
+    result = _add_segment_overlap([seg0])
+    assert len(result) == 1
+    assert result[0].content == original
+
+
+def test_overlap_empty_list():
+    """Empty list should return empty."""
+    assert _add_segment_overlap([]) == []
+
+
+def test_overlap_breaks_at_word_boundary():
+    """Overlap text should not start mid-word."""
+    # Create content where the 300-char boundary falls mid-word
+    long_content = "abcdefghij " * 50  # 550 chars, each word 10 chars + space
+    seg0 = _make_segment(long_content.strip(), idx=0)
+    seg1 = _make_segment("Next.", idx=1)
+
+    _add_segment_overlap([seg0, seg1])
+    # The overlap text should start at a word boundary (first char not mid-word)
+    overlap_part = seg1.content.split("\n")[0]
+    assert not overlap_part[0].islower() or overlap_part.startswith("abcdefghij")
+
+
+def test_overlap_applied_in_parse_response():
+    """parse_segmentation_response should apply overlap to multi-segment results."""
+    # Build a response with two segments, first one long enough for overlap
+    first_content = "word " * 200
+    response = (
+        f"---SEGMENT---\ntopic: First\nspeakers: [\"A\"]\n{first_content}\n"
+        f"---SEGMENT---\ntopic: Second\nspeakers: [\"B\"]\nSecond segment content."
+    )
+    segments = parse_segmentation_response(response, episode_id="ep-overlap")
+    assert len(segments) == 2
+    # Second segment should contain overlap from first
+    assert "Second segment content." in segments[1].content
+    assert len(segments[1].content) > len("Second segment content.")

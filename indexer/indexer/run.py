@@ -15,11 +15,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from indexer.embed import generate_embeddings, prepare_embedding_text
 from indexer.extract import extract_from_segment
-from indexer.models import EpisodeMetadata, ExtractionResult, SegmentMetadata
+from indexer.guest import extract_guest_profile
+from indexer.models import EpisodeMetadata, ExtractionResult, GuestProfile, SegmentMetadata
 from indexer.parse import parse_transcript_metadata
 from indexer.segment import segment_transcript
 from indexer.upload import (
     build_d1_insert_statements,
+    build_guest_insert_statement,
     upload_to_d1,
     upload_to_vectorize,
 )
@@ -31,7 +33,7 @@ async def process_episode(
     filepath: Path,
     episode_index: int,
     dry_run: bool = False,
-) -> tuple[EpisodeMetadata, list[SegmentMetadata], list[ExtractionResult], list[dict]]:
+) -> tuple[EpisodeMetadata, list[SegmentMetadata], list[ExtractionResult], list[dict], GuestProfile | None]:
     """Process a single episode through the full pipeline."""
     episode_id = f"ep-{episode_index}"
     console.print(f"  [dim]Parsing metadata...[/dim]")
@@ -42,6 +44,15 @@ async def process_episode(
     console.print(f"  [dim]Segmenting with Haiku...[/dim]")
     segments = await segment_transcript(content, episode_id)
     console.print(f"  [dim]  → {len(segments)} segments[/dim]")
+
+    console.print(f"  [dim]Extracting guest profile...[/dim]")
+    intro_text = "\n".join(seg.content for seg in segments[:2])
+    try:
+        guest_profile = await extract_guest_profile(intro_text, fallback_name=episode.guest)
+        console.print(f"  [dim]  → {guest_profile.name}: {guest_profile.current_role or 'role unknown'} @ {guest_profile.current_company or '?'}[/dim]")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ Guest extraction failed: {e}[/yellow]")
+        guest_profile = None
 
     console.print(f"  [dim]Extracting with Sonnet...[/dim]")
     extractions: list[ExtractionResult] = []
@@ -86,6 +97,7 @@ async def process_episode(
     if dry_run:
         output = {
             "episode": episode.model_dump(),
+            "guest": guest_profile.model_dump() if guest_profile else None,
             "segments": [s.model_dump() for s in segments],
             "extractions": [e.model_dump() for e in extractions],
         }
@@ -93,7 +105,7 @@ async def process_episode(
         dry_run_path.write_text(json.dumps(output, indent=2))
         console.print(f"  [dim]Dry run output: {dry_run_path}[/dim]")
 
-    return episode, segments, extractions, vectors
+    return episode, segments, extractions, vectors, guest_profile
 
 
 @click.command()
@@ -158,13 +170,15 @@ async def _run_pipeline(
     for i, filepath in enumerate(files):
         console.print(f"\n[bold][{i+1}/{len(files)}] {filepath.name}[/bold]")
 
-        episode, segments, extractions, vectors = await process_episode(
+        episode, segments, extractions, vectors, guest_profile = await process_episode(
             filepath=filepath,
             episode_index=i + 1,
             dry_run=dry_run,
         )
 
         stmts = build_d1_insert_statements(episode, segments, extractions)
+        if guest_profile:
+            stmts.append(build_guest_insert_statement(guest_profile))
         all_stmts.extend(stmts)
         all_vectors.extend(vectors)
 

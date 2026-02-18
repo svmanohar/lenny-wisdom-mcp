@@ -43,7 +43,7 @@ class ExtractedHeuristic(BaseModel):
 class ExtractedExample(BaseModel):
     """A concrete company example illustrating a concept."""
 
-    company: str
+    company: str | None = None
     situation: str
     outcome: str | None = None
 
@@ -55,6 +55,19 @@ class ExtractedCommunicationPattern(BaseModel):
     audience: str | None = None
     example: str | None = None
     source_attribution: str | None = None
+
+
+class GuestProfile(BaseModel):
+    """Structured profile of a podcast guest extracted from the intro."""
+
+    name: str
+    current_role: str | None = None
+    current_company: str | None = None
+    notable_companies: list[str] = Field(default_factory=list)
+    domain_expertise: list[str] = Field(default_factory=list)
+    company_stages: list[str] = Field(default_factory=list)
+    industry_verticals: list[str] = Field(default_factory=list)
+    bio_summary: str | None = None
 
 
 class ExtractionResult(BaseModel):
