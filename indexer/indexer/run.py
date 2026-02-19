@@ -201,6 +201,21 @@ def build_payloads(
 
 # ── Per-episode processor ──────────────────────────────────────────────────────
 
+def _episode_slug(filepath: Path) -> str:
+    """Derive a stable, unique slug from a transcript filepath.
+
+    For subdirectory transcripts (e.g. brian-chesky/transcript.md) → 'brian-chesky'.
+    For flat .txt files (e.g. 'Dr. Becky Kennedy.txt') → 'dr-becky-kennedy'.
+    """
+    import re
+    if filepath.name == "transcript.md":
+        return filepath.parent.name
+    # Flat file: slugify the stem
+    slug = filepath.stem.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    return slug.strip("-")
+
+
 async def process_episode(
     filepath: Path,
     episode_index: int,
@@ -216,7 +231,7 @@ async def process_episode(
     If a cache file exists and --force is not set, loads from cache instead
     of calling AI APIs.
     """
-    episode_name = filepath.parent.name
+    episode_name = _episode_slug(filepath)
 
     try:
         # ── Try loading from cache ────────────────────────────────────────
@@ -242,7 +257,7 @@ async def process_episode(
             )
 
         # ── Full AI processing ────────────────────────────────────────────
-        episode_id = f"ep-{episode_index}"
+        episode_id = episode_name
 
         # Step 1: parse metadata (local, instant)
         episode = parse_transcript_metadata(filepath)
@@ -465,7 +480,7 @@ async def _run_pipeline(
             # Upload-only mode: load all from cache, no AI calls
             for i, filepath in enumerate(files):
                 idx = i + 1
-                episode_name = filepath.parent.name
+                episode_name = _episode_slug(filepath)
                 if has_cache(filepath):
                     try:
                         episode, guest, segments, extractions, embeddings = load_cache(filepath)
