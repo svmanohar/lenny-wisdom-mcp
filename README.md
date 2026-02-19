@@ -2,7 +2,7 @@
 
 An MCP (Model Context Protocol) server that gives Claude access to 300+ episodes of [Lenny's Podcast](https://www.lennyspodcast.com/) — the leading podcast for product managers. Ask it for frameworks, real company examples, coaching on decisions, and vocabulary guidance, all grounded in what guests actually said.
 
-Built on Cloudflare Workers with D1 and Vectorize. Transport: streamable HTTP. New episodes sync automatically from Dropbox.
+Built on Cloudflare Workers with D1 and Vectorize. Transport: streamable HTTP. New episodes sync automatically from Dropbox. Self-service token registration — no approval needed.
 
 ---
 
@@ -23,6 +23,87 @@ sharpen_language("we need to move fast" audience="executive")
 
 ---
 
+## Quickstart
+
+No approval required. Register a token and connect in under a minute.
+
+### 1. Get a token
+
+```bash
+curl -X POST https://lenny-wisdom-mcp.vsman-dev.workers.dev/register \
+  -H "Content-Type: application/json" \
+  -d '{"label": "my project"}'
+```
+
+Response:
+
+```json
+{
+  "token": "lw_abc123...",
+  "tier": "free",
+  "daily_vector_limit": 20,
+  "setup_command": "claude mcp add lenny-wisdom --transport http --url https://lenny-wisdom-mcp.vsman-dev.workers.dev/mcp --header \"Authorization: Bearer lw_abc123...\""
+}
+```
+
+### 2. Connect from Claude Code
+
+Copy-paste the `setup_command` from the response:
+
+```bash
+claude mcp add lenny-wisdom --transport http \
+  --url https://lenny-wisdom-mcp.vsman-dev.workers.dev/mcp \
+  --header "Authorization: Bearer lw_abc123..."
+```
+
+Restart Claude Code. You're done — try `search_wisdom`, `coach_me`, or any of the 9 tools.
+
+### Alternative: manual config
+
+Add to `~/.claude/mcp_servers.json` (global) or `.mcp.json` (project-scoped):
+
+```json
+{
+  "lenny-wisdom": {
+    "type": "http",
+    "url": "https://lenny-wisdom-mcp.vsman-dev.workers.dev/mcp",
+    "headers": {
+      "Authorization": "Bearer lw_abc123..."
+    }
+  }
+}
+```
+
+---
+
+## Access tiers
+
+| Tier | Vector searches/day | How to get |
+|------|-------------------|------------|
+| **Free** | 20 | `POST /register` with a label |
+| **BYOK** | Unlimited | `POST /register` with your own Voyage AI key |
+| **Admin** | Unlimited | Server-configured `MCP_AUTH_TOKEN` secret |
+
+### What's rate-limited
+
+Only the 5 tools that call Voyage AI for vector search are rate-limited:
+`search_wisdom`, `coach_me`, `challenge_decision`, `teach_framework`, `sharpen_language`
+
+The 4 D1-only tools are unlimited for all tiers:
+`find_frameworks`, `find_examples`, `get_episode_context`, `list_guests`
+
+### Bring your own key (BYOK)
+
+If you have a [Voyage AI](https://dash.voyageai.com/) API key, register with it for unlimited access. Your key is used only for your own queries.
+
+```bash
+curl -X POST https://lenny-wisdom-mcp.vsman-dev.workers.dev/register \
+  -H "Content-Type: application/json" \
+  -d '{"label": "my project", "voyage_api_key": "pa-..."}'
+```
+
+---
+
 ## Architecture
 
 ```
@@ -34,6 +115,15 @@ sharpen_language("we need to move fast" audience="executive")
                           ┌────────────────▼─────────────────────┐
                           │     Cloudflare Worker (TypeScript)    │
                           │                                       │
+                          │  POST /register → token (no auth)     │
+                          │  POST /mcp     → authenticate()       │
+                          │       │          ↓                     │
+                          │       │  admin token? → fast path      │
+                          │       │  lw_ token?   → D1 lookup      │
+                          │       │          ↓                     │
+                          │       │  rate limit check (free tier)  │
+                          │       │  BYOK key swap  (byok tier)   │
+                          │       ↓                                │
                           │  ┌─────────────────────────────────┐  │
                           │  │   LennyWisdomMCP (McpAgent DO)  │  │
                           │  │   9 tools registered via MCP SDK│  │
@@ -44,7 +134,7 @@ sharpen_language("we need to move fast" audience="executive")
                     │                    │                       │
           ┌─────────▼──────┐  ┌──────────▼───────┐  ┌──────────▼──────┐
           │  Cloudflare D1  │  │  CF Vectorize     │  │   Voyage AI     │
-          │  (9 tables)     │  │  1024-dim cosine  │  │  voyage-3       │
+          │  (11 tables)    │  │  1024-dim cosine  │  │  voyage-3       │
           │  structured data│  │  segment vectors  │  │  query embeds   │
           └────────────────┘  └──────────────────┘  └─────────────────┘
 
@@ -90,6 +180,8 @@ Indexing pipeline (runs once per episode, cached to disk):
 | `communication_patterns` | How-to-say-it advice | `technique`, `audience`, `example` |
 | `tags` | PM taxonomy tags per segment | 55 tags: `pricing`, `growth`, `hiring`, etc. |
 | `quotes` | Key quotes per segment | `quote`, `speaker` |
+| `api_tokens` | Self-service API tokens | `token_hash`, `tier`, `voyage_api_key`, `daily_limit` |
+| `rate_limits` | Daily vector search counters | `token_id`, `date`, `vector_search_count` |
 
 ---
 
@@ -309,21 +401,7 @@ If you hit API rate limits, reduce `--episode-concurrency` first.
 
 ### 4. Configure Claude Code
 
-Add to `~/.claude/mcp_servers.json` (global) or `.mcp.json` (project-scoped):
-
-```json
-{
-  "lenny-wisdom": {
-    "type": "http",
-    "url": "https://lenny-wisdom-mcp.<your-subdomain>.workers.dev/mcp",
-    "headers": {
-      "Authorization": "Bearer <your-mcp-auth-token>"
-    }
-  }
-}
-```
-
-Restart Claude Code after editing the config.
+See the [Quickstart](#quickstart) section — register a token via `POST /register` and run the `setup_command` from the response. No manual config needed.
 
 ### 5. Auto-sync new episodes (optional)
 
@@ -393,6 +471,8 @@ uv run pytest  # 49 pytest tests (all API clients mocked)
 - **`nodejs_compat` required** — the `agents` package needs this compatibility flag in `wrangler.toml`
 - **`ExtractedExample.company` is nullable** — Sonnet occasionally returns null for the company field
 - **Dropbox access token expires in 4 hours** — the sync script auto-refreshes via the stored refresh token; re-run `dropbox_auth.py` only if the app is revoked
+- **API tokens are shown once** — `POST /register` returns the raw token; only a SHA-256 hash is stored in D1. If you lose it, register a new one
+- **`challenge_decision` costs 2 rate-limit units** — it runs 2 parallel vector searches per call (counterarguments + context)
 
 ---
 
@@ -402,15 +482,21 @@ uv run pytest  # 49 pytest tests (all API clients mocked)
 lenny-wisdom-mcp/
 ├── worker/                         # Cloudflare Worker
 │   ├── src/
-│   │   ├── index.ts                # MCP handler + fetch handler
+│   │   ├── index.ts                # MCP handler + fetch handler + auth middleware
 │   │   ├── db/
 │   │   │   ├── queries.ts          # D1 queries
-│   │   │   └── schema.sql          # 9-table schema
+│   │   │   └── schema.sql          # 11-table schema
 │   │   ├── lib/
 │   │   │   ├── types.ts            # TypeScript interfaces
+│   │   │   ├── auth.ts             # Token auth (SHA-256 hash, D1 lookup)
+│   │   │   ├── rate-limit.ts       # Daily vector search counter
+│   │   │   ├── register.ts         # POST /register handler
+│   │   │   ├── guarded-vector-query.ts  # Rate-limited vector search wrapper
 │   │   │   ├── format.ts           # Markdown formatters
 │   │   │   └── vector-search.ts    # Voyage query embedding + Vectorize search
 │   │   └── tools/                  # One file per MCP tool
+│   ├── migrations/
+│   │   └── 0001_add_auth_tables.sql
 │   ├── wrangler.toml
 │   └── package.json
 ├── indexer/                        # Python indexing pipeline

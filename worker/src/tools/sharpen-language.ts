@@ -1,6 +1,6 @@
-import type { Env } from "../lib/types";
+import type { Env, AuthContext } from "../lib/types";
 import { enrichSegments, searchCommunicationPatterns } from "../db/queries";
-import { vectorQuery } from "../lib/vector-search";
+import { guardedVectorQuery } from "../lib/guarded-vector-query";
 
 export interface SharpenLanguageArgs {
   message: string;
@@ -16,15 +16,17 @@ export interface SharpenLanguageArgs {
  */
 export async function handleSharpenLanguage(
   args: SharpenLanguageArgs,
-  env: Env
+  env: Env,
+  authCtx: AuthContext
 ): Promise<string> {
   const maxSources = Math.min(args.max_sources ?? 5, 10);
 
   // Search for relevant communication patterns and general wisdom
   const [patterns, matches] = await Promise.all([
     searchCommunicationPatterns(env.DB, args.audience, args.context),
-    vectorQuery(
+    guardedVectorQuery(
       env,
+      authCtx,
       `communicating ${args.message} to ${args.audience} ${args.context ?? ""}`,
       { topK: maxSources }
     ),

@@ -10,16 +10,21 @@ const VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings";
 export async function vectorQuery(
   env: Env,
   text: string,
-  options: { topK?: number; filter?: Record<string, string> } = {}
+  options: {
+    topK?: number;
+    filter?: Record<string, string>;
+    voyageApiKey?: string;
+  } = {}
 ): Promise<VectorMatch[]> {
   const topK = options.topK ?? 10;
+  const voyageKey = options.voyageApiKey ?? env.VOYAGE_API_KEY;
 
   // Generate query embedding via Voyage AI REST API
   const response = await fetch(VOYAGE_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${env.VOYAGE_API_KEY}`,
+      Authorization: `Bearer ${voyageKey}`,
     },
     body: JSON.stringify({
       input: [text],

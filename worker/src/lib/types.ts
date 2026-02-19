@@ -84,6 +84,15 @@ export interface Env {
   MCP_AGENT: DurableObjectNamespace;
 }
 
+export type AuthTier = "free" | "byok" | "admin";
+
+export interface AuthContext {
+  tokenId: string;
+  tier: AuthTier;
+  voyageApiKey: string | null;
+  dailyLimit: number;
+}
+
 /**
  * Result from our vector search helper.
  */

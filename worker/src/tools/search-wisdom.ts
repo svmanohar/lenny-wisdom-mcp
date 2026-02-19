@@ -1,6 +1,6 @@
-import type { Env } from "../lib/types";
+import type { Env, AuthContext } from "../lib/types";
 import { enrichSegments, findByTag } from "../db/queries";
-import { vectorQuery } from "../lib/vector-search";
+import { guardedVectorQuery } from "../lib/guarded-vector-query";
 import { formatSearchResults } from "../lib/format";
 
 export interface SearchWisdomArgs {
@@ -17,13 +17,14 @@ export interface SearchWisdomArgs {
  */
 export async function handleSearchWisdom(
   args: SearchWisdomArgs,
-  env: Env
+  env: Env,
+  authCtx: AuthContext
 ): Promise<string> {
   const maxResults = Math.min(args.max_results ?? 5, 20);
   const fmt = args.format ?? "concise";
 
   // Semantic search via AI embedding + Vectorize
-  let matches = await vectorQuery(env, args.query, {
+  let matches = await guardedVectorQuery(env, authCtx, args.query, {
     topK: maxResults * 2, // over-fetch to allow for tag filtering
   });
 

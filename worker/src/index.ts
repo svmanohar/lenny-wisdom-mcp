@@ -1,7 +1,18 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { Env } from "./lib/types";
+import type { Env, AuthContext } from "./lib/types";
+import { authenticate } from "./lib/auth";
+import { handleRegister } from "./lib/register";
+import { RateLimitError } from "./lib/guarded-vector-query";
+
+// Props passed from the outer fetch handler to the DO via ctx.props
+interface AuthProps extends Record<string, unknown> {
+  tokenId: string;
+  tier: string;
+  voyageApiKey: string | null;
+  dailyLimit: number;
+}
 import {
   handleSearchWisdom,
   handleFindFrameworks,
@@ -16,10 +27,42 @@ import {
 
 // McpAgent Durable Object — each session gets its own instance with
 // its own McpServer and transport. Uses streamable-http (default in v0.5.0).
-export class LennyWisdomMCP extends McpAgent<Env> {
-  server = new McpServer({ name: "lenny-wisdom", version: "0.1.0" });
+export class LennyWisdomMCP extends McpAgent<Env, unknown, AuthProps> {
+  server = new McpServer({ name: "lenny-wisdom", version: "0.2.0" });
 
   async init() {
+    // Read auth context from props, set by the outer fetch handler via ctx.props.
+    // The agents SDK passes ctx.props → getAgentByName() → onStart() → this.props.
+    const authCtx: AuthContext = this.props
+      ? {
+          tokenId: this.props.tokenId,
+          tier: this.props.tier as AuthContext["tier"],
+          voyageApiKey: this.props.voyageApiKey,
+          dailyLimit: this.props.dailyLimit,
+        }
+      : {
+          tokenId: "admin",
+          tier: "admin",
+          voyageApiKey: null,
+          dailyLimit: Infinity,
+        };
+
+    // Helper: wrap vector-search tool handlers to catch RateLimitError
+    function wrapVectorTool<T>(
+      handler: (args: T, env: Env, auth: AuthContext) => Promise<string>
+    ) {
+      return async (args: T, env: Env) => {
+        try {
+          return await handler(args, env, authCtx);
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            return `⚠️ ${err.message}`;
+          }
+          throw err;
+        }
+      };
+    }
+
     // --- Retrieval Tools ---
 
     this.server.tool(
@@ -45,17 +88,17 @@ export class LennyWisdomMCP extends McpAgent<Env> {
           .optional()
           .describe("Response format (default concise)"),
       },
-      async ({ query, tag_filter, max_results, format }) => ({
-        content: [
-          {
-            type: "text" as const,
-            text: await handleSearchWisdom(
-              { query, tag_filter, max_results, format },
-              this.env
-            ),
-          },
-        ],
-      })
+      async ({ query, tag_filter, max_results, format }) => {
+        const wrapped = wrapVectorTool(handleSearchWisdom);
+        const text = await wrapped(
+          { query, tag_filter, max_results, format },
+          this.env
+        );
+        return {
+          content: [{ type: "text" as const, text }],
+          isError: text.startsWith("⚠️"),
+        };
+      }
     );
 
     this.server.tool(
@@ -173,7 +216,7 @@ export class LennyWisdomMCP extends McpAgent<Env> {
       })
     );
 
-    // --- Reasoning Tools ---
+    // --- Reasoning Tools (vector-search, rate-limited) ---
 
     this.server.tool(
       "coach_me",
@@ -200,17 +243,17 @@ export class LennyWisdomMCP extends McpAgent<Env> {
           .optional()
           .describe("Maximum source segments to draw from"),
       },
-      async ({ situation, goal, role, max_sources }) => ({
-        content: [
-          {
-            type: "text" as const,
-            text: await handleCoachMe(
-              { situation, goal, role, max_sources },
-              this.env
-            ),
-          },
-        ],
-      })
+      async ({ situation, goal, role, max_sources }) => {
+        const wrapped = wrapVectorTool(handleCoachMe);
+        const text = await wrapped(
+          { situation, goal, role, max_sources },
+          this.env
+        );
+        return {
+          content: [{ type: "text" as const, text }],
+          isError: text.startsWith("⚠️"),
+        };
+      }
     );
 
     this.server.tool(
@@ -236,17 +279,17 @@ export class LennyWisdomMCP extends McpAgent<Env> {
           .optional()
           .describe("Maximum source segments to draw from"),
       },
-      async ({ decision, context, alternatives, max_sources }) => ({
-        content: [
-          {
-            type: "text" as const,
-            text: await handleChallengeDecision(
-              { decision, context, alternatives, max_sources },
-              this.env
-            ),
-          },
-        ],
-      })
+      async ({ decision, context, alternatives, max_sources }) => {
+        const wrapped = wrapVectorTool(handleChallengeDecision);
+        const text = await wrapped(
+          { decision, context, alternatives, max_sources },
+          this.env
+        );
+        return {
+          content: [{ type: "text" as const, text }],
+          isError: text.startsWith("⚠️"),
+        };
+      }
     );
 
     this.server.tool(
@@ -263,17 +306,14 @@ export class LennyWisdomMCP extends McpAgent<Env> {
           .optional()
           .describe("Learning depth (default overview)"),
       },
-      async ({ framework, depth }) => ({
-        content: [
-          {
-            type: "text" as const,
-            text: await handleTeachFramework(
-              { framework, depth },
-              this.env
-            ),
-          },
-        ],
-      })
+      async ({ framework, depth }) => {
+        const wrapped = wrapVectorTool(handleTeachFramework);
+        const text = await wrapped({ framework, depth }, this.env);
+        return {
+          content: [{ type: "text" as const, text }],
+          isError: text.startsWith("⚠️"),
+        };
+      }
     );
 
     this.server.tool(
@@ -300,17 +340,17 @@ export class LennyWisdomMCP extends McpAgent<Env> {
           .optional()
           .describe("Maximum source segments to draw from"),
       },
-      async ({ message, audience, context, max_sources }) => ({
-        content: [
-          {
-            type: "text" as const,
-            text: await handleSharpenLanguage(
-              { message, audience, context, max_sources },
-              this.env
-            ),
-          },
-        ],
-      })
+      async ({ message, audience, context, max_sources }) => {
+        const wrapped = wrapVectorTool(handleSharpenLanguage);
+        const text = await wrapped(
+          { message, audience, context, max_sources },
+          this.env
+        );
+        return {
+          content: [{ type: "text" as const, text }],
+          isError: text.startsWith("⚠️"),
+        };
+      }
     );
   }
 }
@@ -330,23 +370,33 @@ export default {
       });
     }
 
-    // Bearer token auth for /mcp endpoint.
-    // Uses 403 (not 401) to avoid triggering the MCP SDK's OAuth negotiation flow.
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader || authHeader !== `Bearer ${env.MCP_AUTH_TOKEN}`) {
-      return new Response(JSON.stringify({ error: "forbidden" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      });
+    // Self-service registration — no auth required
+    if (url.pathname === "/register") {
+      return handleRegister(request, env);
     }
 
-    // Only /mcp is a valid endpoint — reject everything else with JSON 404.
+    // Everything below requires auth
+    const authResult = await authenticate(request, env);
+    if (authResult instanceof Response) {
+      return authResult;
+    }
+
+    // Only /mcp is a valid authenticated endpoint
     if (url.pathname !== "/mcp") {
       return new Response(JSON.stringify({ error: "not found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    // Inject auth context as props for the DO to read.
+    // The agents SDK reads ctx.props and passes to the DO via getAgentByName().
+    (ctx as unknown as { props: AuthProps }).props = {
+      tokenId: authResult.tokenId,
+      tier: authResult.tier,
+      voyageApiKey: authResult.voyageApiKey,
+      dailyLimit: authResult.dailyLimit,
+    };
 
     return mcpHandler.fetch(request, env, ctx);
   },

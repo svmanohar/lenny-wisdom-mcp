@@ -1,6 +1,6 @@
-import type { Env } from "../lib/types";
+import type { Env, AuthContext } from "../lib/types";
 import { enrichSegments, findByTag } from "../db/queries";
-import { vectorQuery } from "../lib/vector-search";
+import { guardedVectorQuery } from "../lib/guarded-vector-query";
 
 export interface CoachMeArgs {
   situation: string;
@@ -17,7 +17,8 @@ export interface CoachMeArgs {
  */
 export async function handleCoachMe(
   args: CoachMeArgs,
-  env: Env
+  env: Env,
+  authCtx: AuthContext
 ): Promise<string> {
   const maxSources = Math.min(args.max_sources ?? 5, 10);
 
@@ -25,7 +26,7 @@ export async function handleCoachMe(
   const searchText = [args.situation, args.goal].filter(Boolean).join(". ");
 
   // Semantic search
-  let matches = await vectorQuery(env, searchText, {
+  let matches = await guardedVectorQuery(env, authCtx, searchText, {
     topK: maxSources * 3,
   });
 

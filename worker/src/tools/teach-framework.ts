@@ -1,6 +1,6 @@
-import type { Env, Framework, SearchResult } from "../lib/types";
+import type { Env, AuthContext, Framework, SearchResult } from "../lib/types";
 import { enrichSegments, searchFrameworks } from "../db/queries";
-import { vectorQuery } from "../lib/vector-search";
+import { guardedVectorQuery } from "../lib/guarded-vector-query";
 
 export interface TeachFrameworkArgs {
   framework: string;
@@ -14,7 +14,8 @@ export interface TeachFrameworkArgs {
  */
 export async function handleTeachFramework(
   args: TeachFrameworkArgs,
-  env: Env
+  env: Env,
+  authCtx: AuthContext
 ): Promise<string> {
   const depth = args.depth ?? "detailed";
 
@@ -23,7 +24,7 @@ export async function handleTeachFramework(
 
   if (frameworks.length === 0) {
     // Fall back to semantic search
-    return await buildSemanticTeaching(args.framework, depth, env);
+    return await buildSemanticTeaching(args.framework, depth, env, authCtx);
   }
 
   // Get unique segment IDs from matching frameworks
@@ -31,7 +32,7 @@ export async function handleTeachFramework(
   const results = await enrichSegments(env.DB, segmentIds);
 
   // Also do a semantic search for additional context
-  const vectorMatches = await vectorQuery(env, args.framework, { topK: 5 });
+  const vectorMatches = await guardedVectorQuery(env, authCtx, args.framework, { topK: 5 });
   const vectorSegmentIds = vectorMatches
     .map((m) => m.id)
     .filter((id) => !segmentIds.includes(id));
@@ -215,9 +216,10 @@ function buildTeachingModule(
 async function buildSemanticTeaching(
   query: string,
   depth: "overview" | "detailed" | "masterclass",
-  env: Env
+  env: Env,
+  authCtx: AuthContext
 ): Promise<string> {
-  const matches = await vectorQuery(env, `framework mental model ${query}`, {
+  const matches = await guardedVectorQuery(env, authCtx, `framework mental model ${query}`, {
     topK: 8,
   });
 

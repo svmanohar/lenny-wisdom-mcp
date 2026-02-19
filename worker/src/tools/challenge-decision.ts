@@ -1,6 +1,6 @@
-import type { Env } from "../lib/types";
+import type { Env, AuthContext } from "../lib/types";
 import { enrichSegments } from "../db/queries";
-import { vectorQuery } from "../lib/vector-search";
+import { guardedVectorQuery } from "../lib/guarded-vector-query";
 
 export interface ChallengeDecisionArgs {
   decision: string;
@@ -15,7 +15,8 @@ export interface ChallengeDecisionArgs {
  */
 export async function handleChallengeDecision(
   args: ChallengeDecisionArgs,
-  env: Env
+  env: Env,
+  authCtx: AuthContext
 ): Promise<string> {
   const maxSources = Math.min(args.max_sources ?? 6, 12);
 
@@ -27,8 +28,8 @@ export async function handleChallengeDecision(
 
   // Run two searches: one for counterarguments, one for direct relevance
   const [challengeMatches, contextMatches] = await Promise.all([
-    vectorQuery(env, decisionQuery, { topK: maxSources }),
-    vectorQuery(env, contextQuery, { topK: maxSources }),
+    guardedVectorQuery(env, authCtx, decisionQuery, { topK: maxSources }),
+    guardedVectorQuery(env, authCtx, contextQuery, { topK: maxSources }),
   ]);
 
   // Merge and deduplicate
