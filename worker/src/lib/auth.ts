@@ -1,4 +1,5 @@
 import type { Env, AuthContext } from "./types";
+import { decryptOrPassthrough } from "./crypto";
 
 /**
  * SHA-256 hash a string and return hex.
@@ -64,10 +65,15 @@ export async function authenticate(
     .run()
     .catch(() => {});
 
+  // Decrypt BYOK key (decryptOrPassthrough handles legacy plaintext values)
+  const voyageApiKey = row.voyage_api_key
+    ? await decryptOrPassthrough(row.voyage_api_key, env.ENCRYPTION_KEY)
+    : null;
+
   return {
     tokenId: row.id,
     tier: row.tier as AuthContext["tier"],
-    voyageApiKey: row.voyage_api_key,
+    voyageApiKey,
     dailyLimit: row.daily_limit,
   };
 }

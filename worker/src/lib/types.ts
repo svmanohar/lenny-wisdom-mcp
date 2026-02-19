@@ -81,6 +81,7 @@ export interface Env {
   AI: Ai;
   MCP_AUTH_TOKEN: string;
   VOYAGE_API_KEY: string;
+  ENCRYPTION_KEY: string;
   MCP_AGENT: DurableObjectNamespace;
 }
 

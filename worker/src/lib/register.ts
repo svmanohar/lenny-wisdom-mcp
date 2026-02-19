@@ -1,5 +1,6 @@
 import type { Env, AuthTier } from "./types";
 import { sha256 } from "./auth";
+import { encrypt } from "./crypto";
 
 const VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings";
 
@@ -69,12 +70,17 @@ export async function handleRegister(
   const tokenHash = await sha256(token);
   const id = crypto.randomUUID();
 
+  // Encrypt BYOK key before storing
+  const storedVoyageKey = body.voyage_api_key
+    ? await encrypt(body.voyage_api_key, env.ENCRYPTION_KEY)
+    : null;
+
   // Store in D1
   await env.DB.prepare(
     `INSERT INTO api_tokens (id, token_hash, label, tier, voyage_api_key, daily_limit)
      VALUES (?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, tokenHash, label, tier, body.voyage_api_key ?? null, dailyLimit)
+    .bind(id, tokenHash, label, tier, storedVoyageKey, dailyLimit)
     .run();
 
   const serverUrl = new URL(request.url).origin;
