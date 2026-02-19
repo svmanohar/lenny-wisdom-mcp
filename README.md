@@ -411,7 +411,7 @@ New episodes are published to a shared Dropbox folder. The sync script polls for
 
 ```bash
 cd indexer
-uv run python dropbox_auth.py
+DROPBOX_APP_KEY=xxx DROPBOX_APP_SECRET=xxx uv run python dropbox_auth.py
 ```
 
 This opens your browser to authorize a Dropbox app. Paste the code back in the terminal. A refresh token is saved to `~/.lenny-wisdom/dropbox_token.json` — access tokens auto-refresh from here (the refresh token never expires).

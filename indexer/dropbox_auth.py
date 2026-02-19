@@ -1,20 +1,21 @@
 """One-time Dropbox OAuth setup to get a refresh token.
 
 Run this once:
-    uv run python dropbox_auth.py
+    DROPBOX_APP_KEY=xxx DROPBOX_APP_SECRET=xxx uv run python dropbox_auth.py
 
 It will open your browser to authorize the app, then save the refresh token
 to ~/.lenny-wisdom/dropbox_token.json for the sync script to use.
 """
 
 import json
+import os
 import webbrowser
 from pathlib import Path
 
 import httpx
 
-APP_KEY = "k6vfbuyb7bljfsf"
-APP_SECRET = "e3fqxn3phf0vpp0"
+APP_KEY = os.environ["DROPBOX_APP_KEY"]
+APP_SECRET = os.environ["DROPBOX_APP_SECRET"]
 TOKEN_FILE = Path.home() / ".lenny-wisdom" / "dropbox_token.json"
 
 

@@ -34,6 +34,8 @@ fi
     export CF_ACCOUNT_ID="your-cf-account-id"
     export CF_DB_ID="your-d1-database-id"
     export CF_API_TOKEN="your-cf-api-token"
+    export DROPBOX_APP_KEY="your-dropbox-app-key"
+    export DROPBOX_APP_SECRET="your-dropbox-app-secret"
 
     cd "$SCRIPT_DIR"
 

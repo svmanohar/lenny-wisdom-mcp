@@ -9,3 +9,8 @@ __pycache__/
 .env
 sync-cron.sh
 .mcp.json
+
+# Local docs containing real API keys/tokens
+HANDOVER.md
+2026-02-17-*.md
+how-it-was-built.md

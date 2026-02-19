@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Env, AuthContext } from "./lib/types";
 import { authenticate } from "./lib/auth";
 import { handleRegister } from "./lib/register";
+import { checkRegisterRateLimit } from "./lib/register-rate-limit";
 import { RateLimitError } from "./lib/guarded-vector-query";
 
 // Props passed from the outer fetch handler to the DO via ctx.props
@@ -370,8 +371,10 @@ export default {
       });
     }
 
-    // Self-service registration — no auth required
+    // Self-service registration — no auth required, rate-limited by IP
     if (url.pathname === "/register") {
+      const rateLimited = await checkRegisterRateLimit(request, env);
+      if (rateLimited) return rateLimited;
       return handleRegister(request, env);
     }
 
