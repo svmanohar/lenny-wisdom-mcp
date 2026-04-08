@@ -108,7 +108,8 @@ export class LennyWisdomMCP extends McpAgent<Env, unknown, AuthProps> {
       {
         query: z
           .string()
-          .describe("Framework name or topic to search for"),
+          .max(40)
+          .describe("Short keyword or framework name to search for (e.g. 'pricing', 'JTBD', 'north star metric'). Keep under 40 chars — this is a keyword match, not semantic search."),
         max_results: z
           .number()
           .int()
@@ -136,12 +137,14 @@ export class LennyWisdomMCP extends McpAgent<Env, unknown, AuthProps> {
       {
         company: z
           .string()
+          .max(40)
           .optional()
-          .describe("Company name to search for"),
+          .describe("Company name keyword (e.g. 'Spotify', 'Airbnb'). Short name only."),
         topic: z
           .string()
+          .max(40)
           .optional()
-          .describe("PM topic to filter examples by"),
+          .describe("PM topic keyword (e.g. 'growth', 'onboarding'). Short keyword only."),
         max_results: z
           .number()
           .int()
@@ -167,7 +170,7 @@ export class LennyWisdomMCP extends McpAgent<Env, unknown, AuthProps> {
       "get_episode_context",
       "Get full context for a specific episode: all segments, frameworks, examples, and quotes.",
       {
-        guest: z.string().optional().describe("Guest name to look up"),
+        guest: z.string().max(40).optional().describe("Guest name (e.g. 'Shreyas Doshi', 'Lenny')"),
         episode_number: z
           .number()
           .int()
@@ -175,8 +178,9 @@ export class LennyWisdomMCP extends McpAgent<Env, unknown, AuthProps> {
           .describe("Episode number"),
         title: z
           .string()
+          .max(40)
           .optional()
-          .describe("Episode title to search for"),
+          .describe("Short title keyword (e.g. 'north star metric'). Keep under 40 chars."),
       },
       async ({ guest, episode_number, title }) => ({
         content: [
@@ -197,8 +201,9 @@ export class LennyWisdomMCP extends McpAgent<Env, unknown, AuthProps> {
       {
         topic: z
           .string()
+          .max(40)
           .optional()
-          .describe("Filter guests by PM taxonomy topic"),
+          .describe("PM topic keyword to filter by (e.g. 'pricing', 'retention'). Short keyword only."),
         max_results: z
           .number()
           .int()
@@ -331,8 +336,9 @@ export class LennyWisdomMCP extends McpAgent<Env, unknown, AuthProps> {
           ),
         context: z
           .string()
+          .max(40)
           .optional()
-          .describe("Additional context for the communication"),
+          .describe("Short context keyword for pattern matching (e.g. 'board presentation', 'sprint review'). Keep under 40 chars — long context goes in the message field instead."),
         max_sources: z
           .number()
           .int()

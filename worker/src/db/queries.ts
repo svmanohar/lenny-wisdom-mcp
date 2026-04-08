@@ -161,11 +161,11 @@ export async function searchFrameworks(
   db: D1Database,
   query: string
 ): Promise<Framework[]> {
-  const pattern = `%${query}%`;
+  const pattern = `%${escapeLike(query)}%`;
   const res = await db
     .prepare(
       `SELECT * FROM frameworks
-       WHERE name LIKE ?1 OR description LIKE ?1
+       WHERE name LIKE ?1 ESCAPE '\\' OR description LIKE ?1 ESCAPE '\\'
        ORDER BY name
        LIMIT 50`
     )
@@ -187,20 +187,20 @@ export async function searchExamples(
       .prepare(
         `SELECT e.* FROM examples e
          JOIN tags t ON e.segment_id = t.segment_id
-         WHERE e.company LIKE ?1 AND t.tag LIKE ?2
+         WHERE e.company LIKE ?1 ESCAPE '\\' AND t.tag LIKE ?2 ESCAPE '\\'
          ORDER BY e.company
          LIMIT 50`
       )
-      .bind(`%${company}%`, `%${topic}%`)
+      .bind(`%${escapeLike(company)}%`, `%${escapeLike(topic)}%`)
       .all();
     return (res.results ?? []) as unknown as Example[];
   }
   if (company) {
     const res = await db
       .prepare(
-        `SELECT * FROM examples WHERE company LIKE ?1 ORDER BY company LIMIT 50`
+        `SELECT * FROM examples WHERE company LIKE ?1 ESCAPE '\\' ORDER BY company LIMIT 50`
       )
-      .bind(`%${company}%`)
+      .bind(`%${escapeLike(company)}%`)
       .all();
     return (res.results ?? []) as unknown as Example[];
   }
@@ -209,11 +209,11 @@ export async function searchExamples(
       .prepare(
         `SELECT e.* FROM examples e
          JOIN tags t ON e.segment_id = t.segment_id
-         WHERE t.tag LIKE ?1
+         WHERE t.tag LIKE ?1 ESCAPE '\\'
          ORDER BY e.company
          LIMIT 50`
       )
-      .bind(`%${topic}%`)
+      .bind(`%${escapeLike(topic)}%`)
       .all();
     return (res.results ?? []) as unknown as Example[];
   }
@@ -255,10 +255,10 @@ export async function listGuests(
            FROM episodes e
            JOIN segments s ON s.episode_id = e.id
            JOIN tags t ON t.segment_id = s.id
-           WHERE e.guest IS NOT NULL AND t.tag LIKE ?1
+           WHERE e.guest IS NOT NULL AND t.tag LIKE ?1 ESCAPE '\\'
            GROUP BY e.id, e.guest, e.title
            ORDER BY e.guest`;
-    params = [`%${topic}%`];
+    params = [`%${escapeLike(topic)}%`];
   } else {
     sql = `SELECT guest, title FROM episodes
            WHERE guest IS NOT NULL
@@ -305,12 +305,12 @@ export async function searchCommunicationPatterns(
     const res = await db
       .prepare(
         `SELECT * FROM communication_patterns
-         WHERE audience LIKE ?1
-           AND (technique LIKE ?2 OR example LIKE ?2)
+         WHERE audience LIKE ?1 ESCAPE '\\'
+           AND (technique LIKE ?2 ESCAPE '\\' OR example LIKE ?2 ESCAPE '\\')
          ORDER BY id
          LIMIT 50`
       )
-      .bind(`%${audience}%`, `%${query}%`)
+      .bind(`%${escapeLike(audience)}%`, `%${escapeLike(query)}%`)
       .all();
     return (res.results ?? []) as unknown as CommunicationPattern[];
   }
@@ -318,20 +318,20 @@ export async function searchCommunicationPatterns(
     const res = await db
       .prepare(
         `SELECT * FROM communication_patterns
-         WHERE audience LIKE ?1
+         WHERE audience LIKE ?1 ESCAPE '\\'
          ORDER BY id
          LIMIT 50`
       )
-      .bind(`%${audience}%`)
+      .bind(`%${escapeLike(audience)}%`)
       .all();
     return (res.results ?? []) as unknown as CommunicationPattern[];
   }
   if (query) {
-    const pattern = `%${query}%`;
+    const pattern = `%${escapeLike(query)}%`;
     const res = await db
       .prepare(
         `SELECT * FROM communication_patterns
-         WHERE technique LIKE ?1 OR example LIKE ?1
+         WHERE technique LIKE ?1 ESCAPE '\\' OR example LIKE ?1 ESCAPE '\\'
          ORDER BY id
          LIMIT 50`
       )
@@ -348,6 +348,17 @@ export async function searchCommunicationPatterns(
 }
 
 // ── helpers ──
+
+/**
+ * Escape LIKE special characters (%, _) and truncate to stay under
+ * Cloudflare D1's ~50-char LIKE pattern limit.
+ * Use with ESCAPE '\' in the SQL query.
+ */
+const MAX_LIKE_LENGTH = 40;
+export function escapeLike(input: string): string {
+  const truncated = input.slice(0, MAX_LIKE_LENGTH);
+  return truncated.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
 
 function groupBySegmentId<T>(
   rows: Record<string, unknown>[]

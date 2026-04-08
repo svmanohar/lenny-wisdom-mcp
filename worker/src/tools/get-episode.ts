@@ -1,5 +1,5 @@
 import type { Env, Episode, Segment } from "../lib/types";
-import { enrichSegments } from "../db/queries";
+import { enrichSegments, escapeLike } from "../db/queries";
 import { formatSearchResults } from "../lib/format";
 
 export interface GetEpisodeArgs {
@@ -33,16 +33,16 @@ export async function handleGetEpisode(
     }
   } else if (args.guest) {
     const res = await env.DB
-      .prepare(`SELECT * FROM episodes WHERE guest LIKE ?1 LIMIT 1`)
-      .bind(`%${args.guest}%`)
+      .prepare(`SELECT * FROM episodes WHERE guest LIKE ?1 ESCAPE '\\' LIMIT 1`)
+      .bind(`%${escapeLike(args.guest)}%`)
       .first();
     if (res) {
       episode = rowToEpisode(res);
     }
   } else if (args.title) {
     const res = await env.DB
-      .prepare(`SELECT * FROM episodes WHERE title LIKE ?1 LIMIT 1`)
-      .bind(`%${args.title}%`)
+      .prepare(`SELECT * FROM episodes WHERE title LIKE ?1 ESCAPE '\\' LIMIT 1`)
+      .bind(`%${escapeLike(args.title)}%`)
       .first();
     if (res) {
       episode = rowToEpisode(res);
