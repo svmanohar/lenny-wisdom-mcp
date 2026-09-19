@@ -423,7 +423,7 @@ def main(
         )
     console.print(f"Cache       : {'force refresh' if force else 'enabled'}\n")
 
-    asyncio.run(_run_pipeline(
+    failure_count = asyncio.run(_run_pipeline(
         files=files,
         account_id=account_id or "",
         db_id=db_id or "",
@@ -436,6 +436,9 @@ def main(
         sonnet_concurrency=sonnet_concurrency,
         voyage_concurrency=voyage_concurrency,
     ))
+
+    if failure_count > 0:
+        raise SystemExit(1)
 
 
 async def _run_pipeline(
@@ -450,8 +453,11 @@ async def _run_pipeline(
     episode_concurrency: int,
     sonnet_concurrency: int,
     voyage_concurrency: int,
-) -> None:
-    """Run the full indexing pipeline with concurrent episode processing."""
+) -> int:
+    """Run the full indexing pipeline with concurrent episode processing.
+
+    Returns the number of episode failures.
+    """
 
     # Shared semaphores — one instance per API, shared across all coroutines.
     episode_sem = asyncio.Semaphore(episode_concurrency)
@@ -547,11 +553,11 @@ async def _run_pipeline(
 
     if dry_run:
         console.print(f"\n[bold green]Dry run complete. Cache files saved.[/bold green]")
-        return
+        return len(failures)
 
     if not all_stmt_groups and not all_vectors:
         console.print(f"\n[yellow]Nothing to upload.[/yellow]")
-        return
+        return len(failures)
 
     # ── Upload: D1 and Vectorize run concurrently ──────────────────────────────
     console.print(f"\n[bold]Uploading to Cloudflare...[/bold]")
@@ -567,6 +573,8 @@ async def _run_pipeline(
     await asyncio.gather(_upload_d1(), _upload_vectorize())
 
     console.print(f"\n[bold green]Indexing complete![/bold green]")
+
+    return len(failures)
 
 
 if __name__ == "__main__":
