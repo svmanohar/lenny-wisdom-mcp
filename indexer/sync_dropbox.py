@@ -39,6 +39,7 @@ TRANSCRIPTS_DIR = Path(
 )
 INDEXER_DIR = Path(__file__).parent
 TOKEN_FILE = Path.home() / ".lenny-wisdom" / "dropbox_token.json"
+PENDING_FILE = Path.home() / ".lenny-wisdom" / "pending-index.txt"
 
 
 # ── Dropbox auth ─────────────────────────────────────────────────────────
@@ -180,9 +181,35 @@ def already_has_transcript(filename: str) -> bool:
 # ── Main ─────────────────────────────────────────────────────────────────
 
 
+def _read_pending() -> list[str]:
+    """Read filenames from the pending-index marker file."""
+    if not PENDING_FILE.exists():
+        return []
+    return [line.strip() for line in PENDING_FILE.read_text().splitlines() if line.strip()]
+
+
+def _write_pending(filenames: list[str]):
+    """Write filenames to the pending-index marker file."""
+    PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PENDING_FILE.write_text("\n".join(filenames) + "\n")
+
+
+def _clear_pending():
+    """Remove the pending-index marker file."""
+    if PENDING_FILE.exists():
+        PENDING_FILE.unlink()
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
     token = get_dropbox_token()
+
+    # Check for episodes that failed indexing on a previous run
+    pending = _read_pending()
+    if pending:
+        print(f"Found {len(pending)} episode(s) pending from a previous failed run:")
+        for name in pending:
+            print(f"  ~ {name}")
 
     print("Listing files in Dropbox shared folder...")
     dropbox_files = list_dropbox_files(token)
@@ -194,13 +221,14 @@ def main():
         if not already_has_transcript(name):
             new_files.append(name)
 
-    if not new_files:
+    if not new_files and not pending:
         print("No new transcripts to process.")
         return
 
-    print(f"\n{len(new_files)} new transcript(s) to sync:")
-    for name in new_files:
-        print(f"  + {name}")
+    if new_files:
+        print(f"\n{len(new_files)} new transcript(s) to sync:")
+        for name in new_files:
+            print(f"  + {name}")
 
     if dry_run:
         print("\n[DRY RUN] Would download and process the above files.")
@@ -218,11 +246,17 @@ def main():
         except Exception as exc:
             print(f"  ERROR downloading {filename}: {exc}")
 
-    if not downloaded:
+    # Merge newly downloaded with any pending from previous failed run
+    all_to_index = list(dict.fromkeys(pending + downloaded))
+
+    if not all_to_index:
         print("\nNo files downloaded successfully.")
         return
 
-    print(f"\nRunning indexing pipeline for {len(downloaded)} new episode(s)...")
+    # Write marker file before running the pipeline
+    _write_pending(all_to_index)
+
+    print(f"\nRunning indexing pipeline for {len(all_to_index)} episode(s)...")
     cmd = [
         "uv", "run", "python", "-m", "indexer.run",
         "--transcripts", str(TRANSCRIPTS_DIR),
@@ -230,9 +264,12 @@ def main():
     result = subprocess.run(cmd, cwd=str(INDEXER_DIR))
 
     if result.returncode == 0:
+        _clear_pending()
         print("\nSync complete.")
     else:
         print(f"\nPipeline exited with code {result.returncode}")
+        print(f"Pending episodes saved to {PENDING_FILE} for retry on next run.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
