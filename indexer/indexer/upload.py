@@ -34,21 +34,33 @@ def _build_cleanup_stmts(source_file: str, segment_ids: list[str]) -> list[dict]
     """Build DELETE statements to remove existing data for an episode.
 
     Runs before inserts so re-runs are idempotent without duplicating rows.
+    Deletes every segment already stored for this episode (not just the IDs
+    in the current run) because re-segmenting can produce fewer segments,
+    and leftover segments would block the episode DELETE via foreign keys.
+    Also deletes any rows holding the current segment IDs, in case they
+    exist under a different episode row.
     Order: child tables first, then segments, then episode.
     """
-    stmts: list[dict] = []
-    if not segment_ids:
-        return stmts
+    existing = "SELECT id FROM segments WHERE episode_id IN (SELECT id FROM episodes WHERE source_file = ?)"
+    if segment_ids:
+        placeholders = ", ".join("?" for _ in segment_ids)
+        seg_match = f"segment_id IN ({existing}) OR segment_id IN ({placeholders})"
+        seg_params = [source_file, *segment_ids]
+        id_match = f"id IN ({existing}) OR id IN ({placeholders})"
+    else:
+        seg_match = f"segment_id IN ({existing})"
+        seg_params = [source_file]
+        id_match = f"id IN ({existing})"
 
-    placeholders = ", ".join("?" for _ in segment_ids)
+    stmts: list[dict] = []
     for table in ("frameworks", "heuristics", "examples", "communication_patterns", "tags", "quotes"):
         stmts.append({
-            "sql": f"DELETE FROM {table} WHERE segment_id IN ({placeholders})",
-            "params": list(segment_ids),
+            "sql": f"DELETE FROM {table} WHERE {seg_match}",
+            "params": list(seg_params),
         })
     stmts.append({
-        "sql": f"DELETE FROM segments WHERE id IN ({placeholders})",
-        "params": list(segment_ids),
+        "sql": f"DELETE FROM segments WHERE {id_match}",
+        "params": list(seg_params),
     })
     stmts.append({
         "sql": "DELETE FROM episodes WHERE source_file = ?",

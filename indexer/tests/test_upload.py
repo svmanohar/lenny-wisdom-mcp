@@ -113,13 +113,15 @@ def test_build_with_communication_patterns():
 
 
 def test_build_with_no_segments():
-    """Episode with no segments should only produce the episode INSERT."""
+    """Episode with no segments still cleans up old rows, then inserts the episode only."""
     episode = EpisodeMetadata(source_file="empty.md", title="Empty Episode")
     stmts = build_d1_insert_statements(
         episode=episode, segments=[], extractions=[]
     )
-    assert len(stmts) == 1
-    assert "INTO episodes" in stmts[0]["sql"]
+    inserts = [s for s in stmts if "DELETE" not in s["sql"]]
+    assert len(inserts) == 1
+    assert "INTO episodes" in inserts[0]["sql"]
+    assert any(s["sql"] == "DELETE FROM episodes WHERE source_file = ?" for s in stmts)
 
 
 def test_build_with_all_optional_fields_none():
@@ -218,3 +220,41 @@ def test_build_with_full_enrichment():
     assert len(_insert_stmts(stmts, "communication_patterns")) == 1
     assert len(_insert_stmts(stmts, "tags")) == 2
     assert len(_insert_stmts(stmts, "quotes")) == 1
+
+
+def test_cleanup_deletes_all_existing_segments_for_episode():
+    """Re-segmenting into fewer segments must still remove the old extras.
+
+    Regression: cleanup only deleted the new segment IDs, so leftover
+    segments blocked the episode DELETE with a foreign key error.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    schema = (Path(__file__).parents[2] / "worker/src/db/schema.sql").read_text()
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(schema)
+
+    def segs(n):
+        return [
+            SegmentMetadata(segment_id=f"ep-seg-{i}", topic="t", speakers=["L"], content="c", token_count=1)
+            for i in range(n)
+        ]
+
+    def exts(n):
+        return [
+            ExtractionResult(
+                frameworks=[ExtractedFramework(name="F", description="d")],
+                heuristics=[], examples=[], applicable_to=["growth"], key_quote="q",
+            )
+            for _ in range(n)
+        ]
+
+    episode = EpisodeMetadata(source_file="ep.txt", title="Ep")
+    conn.executescript(stmts_to_raw_sql(build_d1_insert_statements(episode, segs(3), exts(3))))
+    conn.executescript(stmts_to_raw_sql(build_d1_insert_statements(episode, segs(2), exts(2))))
+
+    assert conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM segments").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM frameworks").fetchone()[0] == 2
