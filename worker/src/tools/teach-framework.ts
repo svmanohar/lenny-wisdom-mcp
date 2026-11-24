@@ -1,3 +1,4 @@
+import { episodeLabel } from "../lib/episode-label";
 import type { Env, AuthContext, Framework, SearchResult } from "../lib/types";
 import { enrichSegments, searchFrameworks } from "../db/queries";
 import { guardedVectorQuery } from "../lib/guarded-vector-query";
@@ -203,7 +204,7 @@ function buildTeachingModule(
     .filter((r) => r.episode)
     .map((r) => {
       const ep = r.episode!;
-      return ep.guest ? `${ep.title} (${ep.guest})` : ep.title;
+      return episodeLabel(ep);
     });
   const uniqueSources = [...new Set(sourceEpisodes)];
   if (uniqueSources.length > 0) {

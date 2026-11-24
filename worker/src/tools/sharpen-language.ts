@@ -1,3 +1,4 @@
+import { episodeLabel } from "../lib/episode-label";
 import type { Env, AuthContext } from "../lib/types";
 import { enrichSegments, searchCommunicationPatterns } from "../db/queries";
 import { guardedVectorQuery } from "../lib/guarded-vector-query";
@@ -136,7 +137,7 @@ export async function handleSharpenLanguage(
     .filter((r) => r.episode)
     .map((r) => {
       const ep = r.episode!;
-      return ep.guest ? `${ep.title} (${ep.guest})` : ep.title;
+      return episodeLabel(ep);
     });
   const uniqueSources = [...new Set(sourceEpisodes)];
   if (uniqueSources.length > 0) {

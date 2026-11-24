@@ -1,3 +1,4 @@
+import { episodeTitle } from "../lib/episode-label";
 import type { Env, Episode, Segment } from "../lib/types";
 import { enrichSegments, escapeLike } from "../db/queries";
 import { formatSearchResults } from "../lib/format";
@@ -79,16 +80,16 @@ export async function handleGetEpisode(
 
 function formatEpisodeHeader(ep: Episode): string {
   const num = ep.episode_number ? ` #${ep.episode_number}` : "";
-  const guest = ep.guest ? ` with ${ep.guest}` : "";
+  const guest = ep.title && ep.guest ? ` with ${ep.guest}` : "";
   const date = ep.date ? ` (${ep.date})` : "";
-  return `# Episode${num}: ${ep.title}${guest}${date}`;
+  return `# Episode${num}: ${episodeTitle(ep)}${guest}${date}`;
 }
 
 function rowToEpisode(row: Record<string, unknown>): Episode {
   return {
     id: row.id as number,
     episode_number: (row.episode_number as number) ?? null,
-    title: row.title as string,
+    title: (row.title as string) ?? null,
     guest: (row.guest as string) ?? null,
     date: (row.date as string) ?? null,
     source_file: row.source_file as string,

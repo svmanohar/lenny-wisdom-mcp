@@ -1,7 +1,7 @@
 export interface Episode {
   id: number;
   episode_number: number | null;
-  title: string;
+  title: string | null;
   guest: string | null;
   date: string | null;
   source_file: string;

@@ -1,3 +1,4 @@
+import { episodeTitle } from "./episode-label";
 import type { SearchResult, Framework, Example } from "./types";
 
 /**
@@ -68,9 +69,9 @@ export function formatExamples(examples: Example[]): string {
 function formatResultHeader(r: SearchResult, index: number): string {
   const ep = r.episode;
   const epLabel = ep
-    ? `Episode${ep.episode_number ? ` #${ep.episode_number}` : ""}: ${ep.title}`
+    ? `Episode${ep.episode_number ? ` #${ep.episode_number}` : ""}: ${episodeTitle(ep)}`
     : "Unknown episode";
-  const guest = ep?.guest ? ` (${ep.guest})` : "";
+  const guest = ep?.title && ep.guest ? ` (${ep.guest})` : "";
   const score =
     r.relevance_score > 0 ? ` — relevance: ${r.relevance_score.toFixed(2)}` : "";
   return `## ${index}. ${epLabel}${guest}${score}`;
