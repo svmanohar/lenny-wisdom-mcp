@@ -70,6 +70,7 @@ from indexer.extract import extract_all_segments
 from indexer.guest import extract_guest_profile
 from indexer.models import EpisodeMetadata, ExtractionResult, GuestProfile, SegmentMetadata
 from indexer.parse import parse_transcript_metadata
+from indexer.rss_titles import FeedItem, apply_feed_metadata, fetch_feed
 from indexer.segment import segment_transcript
 from indexer.upload import (
     build_d1_insert_statements,
@@ -199,6 +200,13 @@ def build_payloads(
     return stmts, vectors
 
 
+def _feed_stem(filepath: Path, episode: EpisodeMetadata) -> str:
+    """Name used to look an episode up in the RSS feed (raw filename stem)."""
+    if filepath.name == "transcript.md":
+        return episode.guest or filepath.parent.name
+    return filepath.stem
+
+
 # ── Per-episode processor ──────────────────────────────────────────────────────
 
 def _episode_slug(filepath: Path) -> str:
@@ -225,6 +233,7 @@ async def process_episode(
     voyage_sem: asyncio.Semaphore,
     progress: Progress,
     progress_task_id: int,
+    feed_items: list[FeedItem],
 ) -> EpisodeResult:
     """Process a single episode through the full pipeline.
 
@@ -237,6 +246,7 @@ async def process_episode(
         # ── Try loading from cache ────────────────────────────────────────
         if not force and has_cache(filepath):
             episode, guest, segments, extractions, embeddings = load_cache(filepath)
+            episode = apply_feed_metadata(episode, _feed_stem(filepath, episode), feed_items)
             stmts, vectors = build_payloads(episode, guest, segments, extractions, embeddings)
 
             fw_count = sum(len(e.frameworks) for e in extractions)
@@ -298,7 +308,9 @@ async def process_episode(
         # Step 6: save cache to disk (before upload — protects against upload failures)
         save_cache(filepath, episode, guest_profile, segments, extractions, embeddings)
 
-        # Step 7: build upload payloads
+        # Step 7: build upload payloads (feed title/date applied after the cache
+        # is saved, so the cache stays raw and picks up feed fixes on later runs)
+        episode = apply_feed_metadata(episode, _feed_stem(filepath, episode), feed_items)
         stmts, vectors = build_payloads(episode, guest_profile, segments, extractions, embeddings)
 
         fw_count = sum(len(e.frameworks) for e in extractions)
@@ -469,6 +481,9 @@ async def _run_pipeline(
     failures:        list[EpisodeResult] = []
     cached_count = 0
 
+    # Fetched once per run; empty on failure so the sync never depends on it.
+    feed_items = fetch_feed(console)
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -490,6 +505,7 @@ async def _run_pipeline(
                 if has_cache(filepath):
                     try:
                         episode, guest, segments, extractions, embeddings = load_cache(filepath)
+                        episode = apply_feed_metadata(episode, _feed_stem(filepath, episode), feed_items)
                         stmts, vectors = build_payloads(episode, guest, segments, extractions, embeddings)
                         all_stmt_groups.append(stmts)
                         all_vectors.extend(vectors)
@@ -520,6 +536,7 @@ async def _run_pipeline(
                         voyage_sem=voyage_sem,
                         progress=progress,
                         progress_task_id=task_id,
+                        feed_items=feed_items,
                     )
 
             results: list[EpisodeResult] = list(
