@@ -1,3 +1,4 @@
+import { episodeLabel } from "../lib/episode-label";
 import type { Env, AuthContext } from "../lib/types";
 import { enrichSegments, findByTag } from "../db/queries";
 import { guardedVectorQuery } from "../lib/guarded-vector-query";
@@ -142,16 +143,14 @@ function truncate(s: string, len: number): string {
 
 function formatSources(
   results: Array<{
-    episode: { title: string; guest: string | null } | null;
+    episode: { title: string | null; guest: string | null } | null;
   }>
 ): string {
   const seen = new Set<string>();
   const parts: string[] = [];
   for (const r of results) {
     if (!r.episode) continue;
-    const label = r.episode.guest
-      ? `${r.episode.title} (${r.episode.guest})`
-      : r.episode.title;
+    const label = episodeLabel(r.episode);
     if (seen.has(label)) continue;
     seen.add(label);
     parts.push(label);

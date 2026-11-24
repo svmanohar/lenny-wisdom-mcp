@@ -159,6 +159,25 @@ describe("formatSearchResults", () => {
     expect(result).toContain("Unknown episode");
   });
 
+  it("falls back to the guest name when the episode title is null", () => {
+    const out = formatSearchResults(
+      [makeSearchResult({ episode: makeEpisode({ title: null, guest: "Josh Woodward" }) })],
+      "concise"
+    );
+    expect(out).toContain("Episode #42: Josh Woodward — relevance");
+    expect(out).not.toContain("null");
+    expect(out).not.toContain("Josh Woodward (Josh Woodward)");
+  });
+
+  it("shows 'Untitled episode' when title and guest are both null", () => {
+    const out = formatSearchResults(
+      [makeSearchResult({ episode: makeEpisode({ title: null, guest: null }) })],
+      "concise"
+    );
+    expect(out).toContain("Episode #42: Untitled episode");
+    expect(out).not.toContain("null");
+  });
+
   it("handles episode with null episode_number", () => {
     const result = formatSearchResults([
       makeSearchResult({ episode: makeEpisode({ episode_number: null }) }),

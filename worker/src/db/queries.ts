@@ -1,3 +1,4 @@
+import { episodeTitle } from "../lib/episode-label";
 import type {
   Episode,
   Segment,
@@ -131,7 +132,7 @@ export async function enrichSegments(
     const episode: Episode = {
       id: row["ep_id"] as number,
       episode_number: (row["episode_number"] as number) ?? null,
-      title: row["ep_title"] as string,
+      title: (row["ep_title"] as string) ?? null,
       guest: (row["guest"] as string) ?? null,
       date: (row["date"] as string) ?? null,
       source_file: row["source_file"] as string,
@@ -277,7 +278,10 @@ export async function listGuests(
   >();
   for (const row of (res.results ?? []) as Record<string, unknown>[]) {
     const guest = row["guest"] as string;
-    const title = row["title"] as string;
+    const title = episodeTitle({
+      title: row["title"] as string | null,
+      guest,
+    });
     const entry = guestMap.get(guest) ?? {
       guest,
       titles: new Set<string>(),
