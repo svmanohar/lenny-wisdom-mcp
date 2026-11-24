@@ -34,7 +34,7 @@ SHARED_URL = (
 TRANSCRIPTS_DIR = Path(
     os.getenv(
         "TRANSCRIPTS_DIR",
-        "/Users/sasha/Documents/local-development/lenny-transcripts/episodes",
+        str(Path.home() / "dev" / "lenny-transcripts" / "episodes"),
     )
 )
 INDEXER_DIR = Path(__file__).parent
