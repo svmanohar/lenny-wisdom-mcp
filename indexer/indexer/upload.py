@@ -14,8 +14,8 @@ from indexer.models import (
 
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
 
-MAX_RETRIES = 3
-RETRY_BACKOFF = [1, 3, 10]  # seconds between retries
+MAX_RETRIES = 6
+RETRY_BACKOFF = [2, 5, 10, 20, 40]  # seconds between retries; D1 rate limits use a 10s window
 D1_UPLOAD_CONCURRENCY = 5  # concurrent episode uploads to D1
 
 
@@ -230,12 +230,13 @@ async def _send_sql_with_retry(
                         )
                 return
             is_server_error = resp.status_code >= 500
+            is_rate_limited = resp.status_code == 429
             is_d1_transient = (
                 resp.status_code == 400
                 and '"code":7500' in resp.text
                 and "SQLITE_CONSTRAINT" not in resp.text
             )
-            if (is_server_error or is_d1_transient) and attempt < MAX_RETRIES - 1:
+            if (is_server_error or is_rate_limited or is_d1_transient) and attempt < MAX_RETRIES - 1:
                 await asyncio.sleep(RETRY_BACKOFF[attempt])
                 continue
             raise RuntimeError(
